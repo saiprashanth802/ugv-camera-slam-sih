@@ -1,0 +1,7 @@
+.venv/
+media/
+*.tar.gz
+docker/build.log
+__pycache__/
+*.npz
+phone_calib.yaml

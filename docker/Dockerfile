@@ -27,12 +27,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # TurtleBot3 waffle: has the depth camera RTAB-Map RGB-D needs
 ENV TURTLEBOT3_MODEL=waffle
-ENV GAZEBO_MODEL_PATH=/opt/ros/humble/share/turtlebot3_gazebo/models:$GAZEBO_MODEL_PATH
+# NOTE: /usr/share/gazebo-11/models MUST stay on this path. ground_plane and sun live
+# there; with GAZEBO_MODEL_DATABASE_URI empty they cannot be fetched, and the world
+# then fails to load with 'Unable to find uri[model://ground_plane]'.
+ENV GAZEBO_MODEL_PATH=/opt/ros/humble/share/turtlebot3_gazebo/models:/usr/share/gazebo-11/models
 # Keep Gazebo off the online model DB — it stalls for minutes on a bad venue network
 ENV GAZEBO_MODEL_DATABASE_URI=""
 # Isolate the demo from any other ROS2 traffic on the venue LAN
 ENV ROS_DOMAIN_ID=42
 ENV ROS_LOCALHOST_ONLY=1
+
+# The waffle ships an RGB-only camera; convert it to depth so RTAB-Map has RGB-D.
+COPY patch_depth_camera.py /tmp/patch_depth_camera.py
+RUN python3 /tmp/patch_depth_camera.py
 
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc \
  && echo "export TURTLEBOT3_MODEL=waffle" >> /root/.bashrc

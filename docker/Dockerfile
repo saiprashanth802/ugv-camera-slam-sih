@@ -25,7 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       mesa-utils x11-apps xterm nano less tree python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# TurtleBot3 waffle: has the depth camera RTAB-Map RGB-D needs
+# TurtleBot3 waffle. NOTE: the waffle does NOT ship a depth camera -- it carries imu, lidar
+# and a MONOCULAR RGB camera only (verified against ros-humble-turtlebot3-gazebo 2.3.8).
+# The leftover camera_depth_* TF frames in the URDF make it look otherwise. The RGB-D that
+# RTAB-Map needs comes from patch_depth_camera.py below, not from the stock model.
 ENV TURTLEBOT3_MODEL=waffle
 # NOTE: /usr/share/gazebo-11/models MUST stay on this path. ground_plane and sun live
 # there; with GAZEBO_MODEL_DATABASE_URI empty they cannot be fetched, and the world

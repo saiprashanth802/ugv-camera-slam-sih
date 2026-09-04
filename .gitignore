@@ -5,3 +5,4 @@ docker/build.log
 __pycache__/
 *.npz
 phone_calib.yaml
+vendor/

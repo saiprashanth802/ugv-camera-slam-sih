@@ -27,8 +27,8 @@ GPS-denied navigation.
 | Simulator | **Gazebo Classic** (via `osrf/ros:humble-desktop-full`) | Lightweight, reliable, runs whole stack on one 4060; Isaac Sim rejected as overkill |
 | Sim SLAM | **RTAB-Map** (`ros-humble-rtabmap-ros`) | ROS2-native, **BSD**, apt-installable, outputs occupancy grid Nav2 consumes directly |
 | Navigation | **Nav2** | Standard ROS2 nav stack; goal-pose → path + obstacle avoidance is the money shot |
-| Robot model | **TurtleBot3 `waffle`** | Has a depth camera (needed for RTAB-Map RGB-D); rugged Husky/Jackal deferred to future work |
-| Phone SLAM | **ORB-SLAM3 monocular**, pre-recorded clip | Recognizable "real SLAM" look; **pySLAM** = live-safe fallback (pip, no compile) |
+| Robot model | **TurtleBot3 `waffle`** | Chosen for its camera + lidar. **Correction (2026-09-02): the waffle ships a MONOCULAR RGB camera, not a depth camera** — see RUNBOOK §5. `docker/patch_depth_camera.py` converts it to depth at image-build time, following the upstream RTAB-Map recipe. Rugged Husky/Jackal deferred to future work |
+| Phone SLAM | **ORB-SLAM3 monocular**, pre-recorded clip | Recognizable "real SLAM" look; **pySLAM** = fallback. **Correction (2026-09-05): pySLAM is NOT pip-installable.** The PyPI package named `pyslam` is an unrelated chat library by a different author. The real `luigifreda/pyslam` is a git clone + `./install_all.sh` and builds C++ components, so it must be **containerised** and built at home, never at the venue. It needs **Python 3.11.9** specifically — install conda first so the installer takes its conda branch; the plain-venv path fails on every stock Ubuntu image. Full reasoning in RUNBOOK §7c |
 | Calibration | **OpenCV** chessboard (`calibrate_camera.py`) | Required for ORB-SLAM3 intrinsics |
 | Camera rig | **1 phone + gimbal, NO stereo** | 2-phone stereo needs frame-sync + rigid baseline + stereo calib — fragile overnight, only buys metric scale we already disclaim. Gimbal kept: smooth motion = far better mono tracking |
 | Lighting | Shot **outdoors in daylight**; stated as tested condition | Honest caveat: translatable to harder lighting with some tracking loss |
@@ -37,8 +37,16 @@ GPS-denied navigation.
 
 - **#1 risk: do NOT compile ORB-SLAM3 during the hackathon.** Pangolin/Eigen/OpenCV version fights
   can eat the whole night. Build it (or pySLAM) at home; the phone map is a **pre-recorded clip**.
-- **Fedora/Wayland GUI passthrough** is the biggest setup trap — solve it FIRST (X11 session +
-  `xhost +local:docker` + SELinux `label=disable`). Test with `glxgears` before anything else.
+  **This applies to pySLAM too** — the "live-safe, no compile" premise was wrong (see §2). The
+  fallback has the same build risk as the primary, so both must be containerised at home.
+- **GUI passthrough.** **Correction (2026-09-01): this prediction was half wrong.** XWayland
+  works fine — no X11 session and no logout are needed; `xhost +local:docker` and SELinux
+  `label=disable` are still required. The real trap is **hybrid graphics**: the container
+  renders on the AMD 780M iGPU with no error and Gazebo quietly crawls. Fixed by the three
+  `__NV_*`/`__GLX_*` vars in `run_demo.sh`; always run `check_gpu.sh` first. See RUNBOOK §0.
+- **Wayland also breaks screen recording (2026-09-05).** `ffmpeg -f x11grab` captures a black
+  screen and exits 0 — XWayland surfaces never reach the X root window. Use
+  `scripts/record_screen.py` (GNOME D-Bus screencast). See RUNBOOK §8.
 - **Bake all apt packages into a committed image** (`ugv-slam:demo`) — never reinstall at the venue.
 - **Monocular = no metric scale** — qualitative "it maps" only; don't claim measured distances.
 - **Phone map ≠ sim map** (different coordinate frames) — the two halves connect by *narrative*, not
@@ -51,6 +59,12 @@ GPS-denied navigation.
 
 - **Proves:** the vision → map → autonomous-navigation *pipeline* works, on real outdoor imagery +
   in simulation.
+- **The sim half is GPS-denied but NOT camera-only.** RTAB-Map does the RGB-D mapping and loop
+  closure from the camera, but the odometry it consumes is **Gazebo's wheel encoders** (`/odom`) —
+  the upstream demo runs no `rgbd_odometry` node, and pure visual odometry does not survive the
+  stock textureless/dim worlds. See RUNBOOK §6 for the measured numbers. The **phone half** is the
+  genuinely camera-only result. Say "GPS-denied"; do not say the sim navigates on vision alone — a
+  robotics judge will ask which node produces odometry.
 - **Does NOT prove:** robustness to real terrain/noise/lighting extremes — needs hardware field
   trials = next phase. Stating this = credibility.
 

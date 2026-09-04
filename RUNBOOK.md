@@ -118,6 +118,33 @@ Result on this machine: goal accepted, robot drove from (-3.15, 2.04) to (-1.25,
 against a target of (-1.0, 1.0). In the demo you do this by clicking **2D Goal Pose**
 in RViz instead. Rehearse the click until it is muscle memory, and record a backup capture.
 
+### Choosing a goal that will actually plan  [VERIFIED 2026-09-05]
+
+Do not hand-guess goal coordinates. Verified on this machine: the goal `(-1.0, -0.3)`
+looks like open floor on screen but sits inside a wall of `turtlebot3_house`, and
+Nav2 aborts it every time:
+
+```
+planner_server: GridBased failed to generate a valid path to (-1.00, -0.30)
+bt_navigator:   Goal failed
+```
+
+`scripts/pick_goal.py` removes the guesswork. It reads the live `/map` occupancy grid
+plus the `map -> base_footprint` transform and returns a cell that is known-free, has
+0.3 m of known-free clearance on every side, and sits ~2.5 m from the robot:
+
+```bash
+python3 /ws/scripts/pick_goal.py
+# MAP 202x205 res=0.050 origin=(-8.03,-4.54)
+# ROBOT map=(-6.39,-1.86)
+# GOAL -6.21 0.63  (dist 2.50 m, 0.3m clearance all round)
+```
+
+A goal chosen this way planned and drove on the first attempt. Note the robot pose
+must be read in the **map** frame (`tf2_echo map base_footprint`), not from `/odom` —
+RTAB-Map corrects the map->odom transform, so the two frames diverge as the map
+grows, and a goal computed from `/odom` will land in the wrong place.
+
 ---
 
 ## 5. The waffle has NO depth camera — the image patches it  [VERIFIED 2026-09-02]
@@ -145,8 +172,8 @@ in 0.75–4.56 m.
 
 ### Verifying the camera yourself
 ```bash
-ros2 topic hz /camera/image_raw          # ~28 Hz
-ros2 topic hz /camera/depth/image_raw    # ~20 Hz
+ros2 topic hz /camera/image_raw          # ~30 Hz (measured 30.04 on 2026-09-05)
+ros2 topic hz /camera/depth/image_raw    # ~30 Hz (measured 29.94 on 2026-09-05)
 ros2 topic echo /rtabmap/odom_info_lite --once | grep -E "lost|features|inliers"
 ```
 `features: 0` means the camera is rendering blank or the scene is too dark — that is a
@@ -211,28 +238,149 @@ RMS 0.070 px. The script and the YAML format are trustworthy.
   this is the classic way to lose tracking), blank walls, and large moving objects.
 - Lock the phone to one video mode so the intrinsics stay valid.
 
-### 7c. Run SLAM on the clip  [UNVERIFIED]
-**Do NOT compile ORB-SLAM3 at the venue** (SPEC §3, risk #1). Build at home, or use
-pySLAM (pip, no compile) as the live-safe fallback. Either way the phone map is played
-back from a **pre-recorded clip** — never live on stage.
+### 7c. Run SLAM on the clip  [pySLAM build IN PROGRESS 2026-09-05]
+**Do NOT compile ORB-SLAM3 at the venue** (SPEC §3, risk #1). Either way the phone map is
+played back from a **pre-recorded clip** — never live on stage.
+
+#### pySLAM is NOT "pip, no compile" — SPEC §2 was wrong
+
+Verified 2026-09-05. Three corrections to what SPEC assumed:
+
+1. **`pip install pyslam` gets you the wrong package.** The name `pyslam` on PyPI is an
+   unrelated chat/comms library by a different author. The SLAM one is
+   `github.com/luigifreda/pyslam`, installed by cloning and running `./install_all.sh`.
+2. **It compiles C++ and pulls ~GB of models.** It is not a lightweight pip install. It
+   must be built at home and baked, exactly like the ROS image (SPEC §3).
+3. **Neither Ubuntu 22.04 nor 24.04 works with the plain venv install.** Both were
+   tried on 2026-09-05 and both fail, for *different* reasons. This is the single most
+   time-expensive thing to rediscover, so it is written out in full:
+
+   | Base | Python | Failure |
+   |---|---|---|
+   | `ubuntu:22.04` | 3.10.12 | `ERROR: Package 'pyslam' requires a different Python: 3.10.12 not in '>=3.11.9'` |
+   | `ubuntu:24.04` | 3.12.3 | pySLAM pins `scikit-image==0.21.0`, which has **no cp312 wheel**. pip falls back to a source build, whose pythran/GCC-13 compile dies with `fatal error: template instantiation depth exceeds maximum of 900`. |
+
+   The two constraints leave a **narrow gap at Python 3.11**, and that is not an
+   accident — it is what upstream targets:
+
+   ```
+   pyproject.toml:            requires-python = ">=3.11.9"
+   pyproject.toml:            "scikit-image==0.21.0"
+   scripts/pyenv-conda-create.sh:  PYSLAM_PYTHON_VERSION="${2:-3.11.9}"
+   ```
+
+   Python 3.11 satisfies `>=3.11.9` **and** has a prebuilt `scikit-image==0.21.0`
+   wheel, so nothing compiles. No stock Ubuntu image ships 3.11.9.
+
+   **Therefore: install conda first and let the installer take its conda branch.**
+   `install_all.sh` checks `command -v conda` and, if found, calls
+   `install_all_conda.sh`, which creates the env at exactly Python 3.11.9. The venv
+   branch is the trap; the conda branch is the supported path.
+
+   ```bash
+   docker exec pyslam-build bash -lc '
+     cd /tmp && curl -fsSL -o mf.sh \
+       https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+     && bash mf.sh -b -p /opt/conda'
+   docker exec pyslam-build bash -lc '
+     export PATH=/opt/conda/bin:$PATH; source /opt/conda/etc/profile.d/conda.sh
+     cd /pyslam && ./install_all.sh 2>&1 | tee install_conda.log'
+   ```
+
+The build runs in a container against the repo at `vendor/pyslam` (gitignored):
+
+```bash
+docker run -d --name pyslam-build --gpus all \
+  -v "$PWD/vendor/pyslam:/pyslam:rw" -e DEBIAN_FRONTEND=noninteractive \
+  --security-opt label=disable ubuntu:24.04 sleep infinity
+docker exec pyslam-build bash -lc 'apt-get update -qq && apt-get install -y -qq \
+  sudo git curl wget unzip build-essential cmake pkg-config python3 python3-dev \
+  python3-venv python3-pip libglew-dev libgl1-mesa-dev libglu1-mesa-dev libeigen3-dev \
+  libsuitesparse-dev libboost-all-dev libopencv-dev ca-certificates rsync'
+docker exec pyslam-build bash -lc 'cd /pyslam && ./install_all.sh 2>&1 | tee install.log'
+```
+
+`install_all.sh` detects `/.dockerenv` and skips its sudo prompt, so it runs unattended.
+It creates its venv at **`/root/.python/venvs/pyslam` inside the container**, NOT in the
+mounted repo — so the container must be `docker commit`ed (and `docker save`d) to keep
+the build. Destroying the container loses the install.
+
+#### Good news: the test sequence ships with the repo
+
+No dataset download is needed to prove the toolchain. `data/videos/kitti06/` contains a
+real 46 MB `video_color.mp4` plus `groundtruth.txt` and `times.txt`, and `config.yaml`
+already defaults to `type: VIDEO_DATASET` pointing at it. That same `VIDEO_DATASET` mode
+is what the **phone clip** will use — so proving KITTI runs proves the path the phone
+footage will take, and only the settings YAML (from `calibrate_camera.py`, §7a) changes.
 
 ---
 
-## 8. Demo-day fallback ladder
+## 8. Recording backup captures — BOTH halves  [VERIFIED 2026-09-05]
+
+**`ffmpeg -f x11grab` does not work on this laptop. Do not reach for it.**
+
+This is a GNOME **Wayland** session. Gazebo and RViz are X11 clients drawn through
+XWayland, and their surfaces are composited by the Wayland compositor — they never
+appear in the X root window. Measured 2026-09-05 with a GL client visibly on screen:
+`ffmpeg -f x11grab -i :0` produced frames with **mean pixel value 0.01, std 1.04** —
+a black screen, with **no error message**. Same failure class as the iGPU trap in §0:
+it looks like it worked. `wf-recorder` is also out (wlroots compositors only).
+
+GNOME's own screencast D-Bus API does work, but has its own trap: the recording is
+bound to the D-Bus **sender**, so a `gdbus call` one-liner starts the capture and then
+immediately kills it as gdbus exits, leaving a **48-byte mp4** and this in the journal:
+
+```
+org.gnome.Shell.Screencast: JS LOG: Fatal error while recording: Sender has vanished
+```
+
+`scripts/record_screen.py` holds one connection open for the whole take, which is the
+only reason it is a script and not a one-liner:
+
+```bash
+./scripts/record_screen.py media/nav2_goal_run --seconds 85
+```
+
+Pass the basename **without** an extension — GNOME appends `.mp4` itself. Ctrl-C stops
+cleanly and keeps the footage. The script warns if the output is under 100 KB, which is
+the signature of the failure above.
+
+**Always play the file back before trusting it.** A capture that silently recorded a
+black screen is worse than no capture, because you will not find out until demo day.
+
+### Captures recorded 2026-09-05
+
+| File | Length | What it shows |
+|---|---|---|
+| `media/map_building.mp4` | 170 s, 106 MB | RTAB-Map building the map live while Nav2 drives the robot through `turtlebot3_house`. Occupancy grid grows **78x53 -> 202x205 cells**; dense 3D point cloud fills in; loop-closure counter advancing. |
+| `media/nav2_goal_run.mp4` | 85 s, 4.7 MB | The money shot. Goal `(-6.21, 0.63)` sent via the §4 action call; robot drove `(-6.40, -1.86) -> (-6.36, 0.47)`, finishing ~0.21 m from target, inside Nav2's tolerance. |
+
+Both verified non-blank by sampling frames across the file, not just at the start.
+
+**`media/` is in `.gitignore`** — these files are NOT in git. The NAS is their only
+backup. Copy them there before leaving home.
+
+Honest note for the pitch: the RViz Nav2 panel in `map_building.mp4` shows
+`Recoveries: 3`. That is Nav2 running recovery behaviours mid-run. It is normal, and
+better acknowledged than hidden if a judge spots it.
+
+---
+
+## 9. Demo-day fallback ladder
 
 Each rung is what you fall back to when the rung above fails. Test every rung (SPEC §7).
 
 | # | If this fails | Fall back to |
 |---|---|---|
-| 1 | Live Nav2 run in Gazebo | Recorded screen capture of a good Nav2 run |
-| 2 | ORB-SLAM3 on the phone clip | pySLAM on the same clip |
-| 3 | Any live SLAM | Recorded capture of the map building |
+| 1 | Live Nav2 run in Gazebo | **`media/nav2_goal_run.mp4`** — recorded 2026-09-05 |
+| 2 | ORB-SLAM3 on the phone clip | pySLAM on the same clip (see §7c for build status) |
+| 3 | Any live SLAM | **`media/map_building.mp4`** — recorded 2026-09-05 |
 | 4 | The laptop | Cloned backup machine (SPEC §8, owner C) |
 | 5 | Everything | The 3 slides + narration |
 
 ---
 
-## 9. Things to say out loud to judges (SPEC §4)
+## 10. Things to say out loud to judges (SPEC §4)
 
 - **Monocular gives no metric scale** — the phone map is qualitative. Never claim
   measured distances from it.

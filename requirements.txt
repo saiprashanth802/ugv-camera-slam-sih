@@ -1,8 +1,9 @@
 # Host-side Python dependencies (the .venv at the repo root).
 #
 # These cover the two scripts that run on the HOST:
-#   scripts/calibrate_camera.py   chessboard calibration -> ORB-SLAM3 intrinsics YAML
-#   scripts/eval_trajectory.py    Umeyama sim3 trajectory scoring
+#   scripts/calibrate_camera.py      chessboard calibration -> ORB-SLAM3 intrinsics YAML
+#   scripts/make_pyslam_settings.py  that YAML -> a pySLAM-loadable settings file
+#   scripts/eval_trajectory.py       Umeyama sim3 trajectory scoring
 #
 # Versions are the ones the results in README.md were produced with.
 #
@@ -16,3 +17,6 @@
 #                            venv. On Fedora: sudo dnf install python3-gobject
 numpy==2.5.2
 opencv-python==5.0.0.93
+# PyYAML is what pySLAM itself parses settings with; make_pyslam_settings.py uses it
+# to read its own output back and fail loudly if the generated file would not load.
+PyYAML==6.0.3

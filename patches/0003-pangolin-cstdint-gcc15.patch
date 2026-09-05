@@ -1,0 +1,125 @@
+Build: add <cstdint> to nine pangolin headers/sources for GCC 15
+
+GCC 15 stopped transitively including <cstdint>, so every pangolin translation unit
+that names uint8_t/uint32_t without including it fails to compile. This is cause (1)
+of the two that keep the pangolin 3D viewer from building; RUNBOOK.md records it as
+solved, and this patch is what solves it.
+
+Nine files need the include, not the eight an earlier note claimed --
+include/pangolin/factory/factory_registry.h was missing from that list. Rather than
+trust any list, drive it from the compiler's own diagnostic:
+
+    note: 'uint32_t' is defined in header '<cstdint>'
+
+That converges whether or not the list is right, which is why the count moved.
+
+This does NOT make pangolin build. Cause (2) is unfixed: the conda toolchain compiles
+against $CONDA_PREFIX/x86_64-conda-linux-gnu/sysroot and cannot see /usr/include, so
+EGL/dc1394 headers installed with apt are invisible to it. See RUNBOOK.md "Parked: the
+pangolin 3D viewer does not build" for why CPATH=/usr/include is the wrong bridge.
+
+Unlike 0001 and 0002, this patch is NOT required to run SLAM -- the viewer is parked and
+--headless avoids it entirely. It is here so the solved half of a parked problem is not
+re-derived by hand from prose, since vendor/ is gitignored.
+
+Upstream: luigifreda/pyslam master @ a5ff256 (no release tags exist).
+Pangolin is vendored inside that tree at thirdparty/pangolin.
+
+diff --git a/thirdparty/pangolin/include/pangolin/factory/factory_registry.h b/thirdparty/pangolin/include/pangolin/factory/factory_registry.h
+index 1ca8382..801ae3c 100644
+--- a/thirdparty/pangolin/include/pangolin/factory/factory_registry.h
++++ b/thirdparty/pangolin/include/pangolin/factory/factory_registry.h
+@@ -27,6 +27,7 @@
+ 
+ #pragma once
+ 
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <memory>
+ #include <vector>
+ #include <algorithm>
+diff --git a/thirdparty/pangolin/include/pangolin/log/packet.h b/thirdparty/pangolin/include/pangolin/log/packet.h
+index a904373..5f514df 100644
+--- a/thirdparty/pangolin/include/pangolin/log/packet.h
++++ b/thirdparty/pangolin/include/pangolin/log/packet.h
+@@ -25,6 +25,7 @@
+ 
+ #pragma once
+ 
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <mutex>
+ 
+ #include <pangolin/log/packetstream.h>
+diff --git a/thirdparty/pangolin/include/pangolin/log/packetstream_reader.h b/thirdparty/pangolin/include/pangolin/log/packetstream_reader.h
+index d929eb4..305a5c5 100644
+--- a/thirdparty/pangolin/include/pangolin/log/packetstream_reader.h
++++ b/thirdparty/pangolin/include/pangolin/log/packetstream_reader.h
+@@ -25,6 +25,7 @@
+ 
+ #pragma once
+ 
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <fstream>
+ #include <mutex>
+ #include <thread>
+diff --git a/thirdparty/pangolin/include/pangolin/log/packetstream_source.h b/thirdparty/pangolin/include/pangolin/log/packetstream_source.h
+index 7a79e49..1e600a5 100644
+--- a/thirdparty/pangolin/include/pangolin/log/packetstream_source.h
++++ b/thirdparty/pangolin/include/pangolin/log/packetstream_source.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <iostream>
+ #include <pangolin/platform.h>
+ #include <pangolin/utils/picojson.h>
+diff --git a/thirdparty/pangolin/include/pangolin/utils/picojson.h b/thirdparty/pangolin/include/pangolin/utils/picojson.h
+index 8525269..08c12d3 100644
+--- a/thirdparty/pangolin/include/pangolin/utils/picojson.h
++++ b/thirdparty/pangolin/include/pangolin/utils/picojson.h
+@@ -35,6 +35,7 @@
+ #ifndef picojson_h
+ #define picojson_h
+ 
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <algorithm>
+ #include <cstdio>
+ #include <cstdlib>
+diff --git a/thirdparty/pangolin/include/pangolin/video/drivers/pango.h b/thirdparty/pangolin/include/pangolin/video/drivers/pango.h
+index f6fecbe..493fc9b 100644
+--- a/thirdparty/pangolin/include/pangolin/video/drivers/pango.h
++++ b/thirdparty/pangolin/include/pangolin/video/drivers/pango.h
+@@ -27,6 +27,7 @@
+ 
+ #pragma once
+ 
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <pangolin/log/packetstream_reader.h>
+ #include <pangolin/log/playback_session.h>
+ #include <pangolin/video/stream_encoder_factory.h>
+diff --git a/thirdparty/pangolin/src/image/image_io_lz4.cpp b/thirdparty/pangolin/src/image/image_io_lz4.cpp
+index 577dd0d..dfebe47 100644
+--- a/thirdparty/pangolin/src/image/image_io_lz4.cpp
++++ b/thirdparty/pangolin/src/image/image_io_lz4.cpp
+@@ -1,3 +1,4 @@
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <fstream>
+ #include <memory>
+ 
+diff --git a/thirdparty/pangolin/src/image/image_io_packed12bit.cpp b/thirdparty/pangolin/src/image/image_io_packed12bit.cpp
+index b280388..7860f17 100644
+--- a/thirdparty/pangolin/src/image/image_io_packed12bit.cpp
++++ b/thirdparty/pangolin/src/image/image_io_packed12bit.cpp
+@@ -1,3 +1,4 @@
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <fstream>
+ #include <memory>
+ 
+diff --git a/thirdparty/pangolin/src/image/image_io_pango.cpp b/thirdparty/pangolin/src/image/image_io_pango.cpp
+index 469599c..54e8a74 100644
+--- a/thirdparty/pangolin/src/image/image_io_pango.cpp
++++ b/thirdparty/pangolin/src/image/image_io_pango.cpp
+@@ -1,3 +1,4 @@
++#include <cstdint>   // GCC 15: uint8_t/uint32_t no longer transitively included
+ #include <pangolin/platform.h>
+ 
+ #include <pangolin/image/typed_image.h>

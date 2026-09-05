@@ -319,7 +319,7 @@ the mounted repo, and the container has been OOM-killed once. It survives a rest
 with `docker export` (streams, needs no local layer — `docker commit` needs ~37 GB and
 will not fit).
 
-#### Two source patches are required — pySLAM does not work without them
+#### Source patches: the first two are required — pySLAM does not work without them
 
 `vendor/` is gitignored, so `patches/` in this repo is the **only** durable record.
 After any fresh clone or rebuild:
@@ -332,6 +332,7 @@ After any fresh clone or rebuild:
 |---|---|
 | `0001-map_point-fix-remove_frame_view-asserts` | Two `__debug__` asserts in `MapPoint.remove_frame_view()` that no caller can satisfy. Killed the Python core at frame 13 (first outlier) and again at frame 93. |
 | `0002-use-gtsam-frontend-pose-optimizer` | The C++ core's g2o pose optimizer is **inert on this build** — it never writes the optimised pose back, so 100% of points were flagged outliers and tracking reset 152 times. Switches `kOptimizationFrontEndUseGtsam` to True. |
+| `0003-pangolin-cstdint-gcc15` | *Not required to run SLAM.* Adds `<cstdint>` to nine pangolin headers/sources that GCC 15 no longer includes transitively. Solves cause (1) of the parked 3D viewer; cause (2) remains open, so pangolin still does not build. |
 
 #### Measured results on KITTI 06, both cores, after the patches
 
@@ -415,7 +416,9 @@ Two separate causes, both traced 2026-09-05:
    added, not the eight in the earlier note — `include/pangolin/factory/factory_registry.h`
    was missing from that list. **This part is solved**; driving the fix from the
    compiler's own `note: 'uint32_t' is defined in header '<cstdint>'` diagnostics
-   converges without needing the list to be right.
+   converges without needing the list to be right. The nine edits are recorded as
+   `patches/0003-pangolin-cstdint-gcc15.patch` — reapply them with
+   `./patches/apply_patches.sh` rather than re-deriving them from this paragraph.
 2. **The conda toolchain cannot see `/usr/include`.** `conda activate pyslam` puts
    **g++ 15.3.0** on PATH (the *system* gcc is 13.3 — checking the wrong one is
    misleading), and it compiles against `$CONDA_PREFIX/x86_64-conda-linux-gnu/sysroot`.

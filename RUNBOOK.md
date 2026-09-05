@@ -226,6 +226,10 @@ cd ~/claude_code_projects/sih_sightline
 Writes `phone_calib.yaml` in ORB-SLAM3 monocular format. **RMS must be < 1.0 px** —
 above that, the board was curled or you shot too few angles. Reshoot.
 
+pySLAM cannot read that file; §7d converts it. Note also that the
+`ORBextractor.nFeatures: 1250` this script bakes in is **not** carried through — 2000
+measurably beats it (§7d).
+
 Validation done 2026-09-01: run against synthetic views from a known camera
 (fx=fy=900, cx=640, cy=360 at 1280x720) it recovered fx=900.28, cx=639.65,
 RMS 0.070 px. The script and the YAML format are trustworthy.
@@ -444,6 +448,132 @@ real 46 MB `video_color.mp4` plus `groundtruth.txt` and `times.txt`, and `config
 already defaults to `type: VIDEO_DATASET` pointing at it. That same `VIDEO_DATASET` mode
 is what the **phone clip** will use — so proving KITTI runs proves the path the phone
 footage will take, and only the settings YAML (from `calibrate_camera.py`, §7a) changes.
+
+---
+
+### 7d. Wiring the walk clip into pySLAM  [VERIFIED 2026-09-06 on a stand-in clip]
+
+§7c ends by saying the phone clip takes the same `VIDEO_DATASET` path as KITTI and "only
+the settings YAML changes". That is true of the *path*. It is not true that
+`phone_calib.yaml` can be dropped in as that settings YAML — it cannot be loaded by
+pySLAM at all. Rehearsed end to end on a stand-in clip 2026-09-06, so that the real
+footage is a file swap and not a debugging session.
+
+**`vendor/` is gitignored, so the `config.yaml` edit below is not in git.** This section
+is its only durable record. After any fresh clone, redo it.
+
+#### The two formats are not compatible, and neither failure is graceful
+
+`calibrate_camera.py` writes the **ORB-SLAM3** format. pySLAM reads its own:
+
+| | calibrate_camera.py writes | pySLAM reads |
+|---|---|---|
+| Header | `%YAML:1.0` (OpenCV FileStorage) | plain YAML, parsed by PyYAML |
+| Intrinsics | `Camera1.fx` (per-camera namespace) | `Camera.fx` (`pyslam/config.py:239`) |
+| Features | `ORBextractor.nFeatures` | `FeatureTrackerConfig.nFeatures` |
+| Viewer | — | `Viewer.on` |
+
+The header alone is fatal, before a single key is read:
+
+```
+yaml.scanner.ScannerError: while scanning a directive
+  in "phone_calib.yaml", line 1, column 1
+```
+
+#### Generate the settings file — do not hand-write it
+
+```bash
+./.venv/bin/python scripts/make_pyslam_settings.py media/calib/phone_calib.yaml \
+    -o vendor/pyslam/settings/SIGHTLINE_PHONE.yaml
+```
+
+It reads the ORB-SLAM3 file with `cv2.FileStorage` (the only reader that accepts the
+`%YAML:1.0` directive), writes the pySLAM keys, then **parses its own output back with
+PyYAML** and asserts every key `config.py` requires is present. If that readback fails
+you find out here, not eight seconds into a run in front of judges.
+
+`phone_calib.yaml` stays the archival record of what the phone measured; the generated
+file is derived. Never hand-edit the derived one — rerun the script.
+
+#### The config.yaml block
+
+Paste over `VIDEO_DATASET:` in `vendor/pyslam/config.yaml` (the script prints this too):
+
+```yaml
+VIDEO_DATASET:
+  type: video
+  sensor_type: mono
+  base_path: ./data/videos/phone_walk
+  settings: settings/SIGHTLINE_PHONE.yaml
+  name: walk.mp4
+```
+
+**Both `groundtruth_file` and `timestamps` must be absent, not blank.** A phone walk has
+neither. If the key is present and the file is not, pySLAM raises `FileNotFoundError`
+(`pyslam/io/dataset.py:211`); absent keys fall through cleanly to
+`GroundTruthType.NONE` (`pyslam/io/ground_truth.py:150`). Keep the KITTI lines commented
+out below it — that is the scored reference run and you will want it back.
+
+#### Run it  — this command was not written down anywhere before
+
+```bash
+docker start pyslam-build
+docker exec pyslam-build bash -lc '
+  source /opt/conda/etc/profile.d/conda.sh && conda activate pyslam
+  cd /pyslam && export PYSLAM_USE_CPP=true
+  python main_slam.py --headless'
+```
+
+Results land in `vendor/pyslam/results/metrics_<UTC timestamp>/`. **The container clock
+is UTC**, so the newest directory is stamped ~5.5 h behind local time — sort by mtime,
+not by name. `other_metrics_info.txt` carries the frame/lost counts.
+
+#### The stand-in rehearsal, and what it does and does not prove
+
+No phone footage existed yet, so the clip was faked honestly: KITTI 06's colour video
+resampled to **1280x720 @ 30 fps** (`cv2.VideoWriter`, `mp4v` — Fedora's ffmpeg has no
+libx264 and its openh264 decoder fails on this input). Anisotropic scaling is exact in
+the pinhole model, so the implied intrinsics are exactly derivable, and 22 synthetic
+chessboard views were rendered from *those* intrinsics and fed to the real
+`calibrate_camera.py` — the same validation trick as §7a. It recovered
+fx 738.22 against a true 738.2355 at **0.098 px RMS**.
+
+**Proven:** the whole chain runs — calibration YAML → generated settings → `config.yaml`
+→ `main_slam.py --headless` on the C++ core → a trajectory file, on a clip with no
+groundtruth and no timestamps, at a resolution and frame rate nothing else here uses.
+
+**Not proven:** anything about how the real walk will score. The stand-in is an upscaled
+re-encode of the sequence the reference numbers came from, and each row below is a single
+run, not a repeated measurement.
+
+#### Finding: the 1250 baked into calibrate_camera.py is the wrong feature count
+
+The two stand-in runs differ **only** in `FeatureTrackerConfig.nFeatures`:
+
+| Run | nFeatures | Frames | Lost | Poses | APE RMSE | % of path |
+|---|---:|---|---:|---:|---:|---:|
+| stand-in | 1250 (inherited from the calib file) | 1101/1101 | 1 | 891 | 99.5 m | 9.89% |
+| stand-in | **2000** | 1101/1101 | **0** | **1089** | **10.1 m** | **0.83%** |
+| KITTI 06 native, C++ core (§7c reference) | 2000 | 1101/1101 | 1 | 1088 | 49.5 m | 4.05% |
+
+`calibrate_camera.py` hard-codes `ORBextractor.nFeatures: 1250`, which has nothing to do
+with calibration — it rides along because ORB-SLAM3 settings files bundle intrinsics and
+extractor config in one file. Carried into pySLAM unexamined it dropped 198 poses and one
+tracked frame. `make_pyslam_settings.py` therefore **defaults to 2000 and reports the
+calib file's value rather than obeying it**; override with `--features` if a run on the
+real footage argues otherwise.
+
+`config.yaml` has been left pointing at **KITTI 06**, not at the stand-in, so that
+fallback-ladder rung 2 keeps working and nobody demos the fake clip by accident. The
+phone block sits commented directly beneath it; swap the comments when the footage
+lands. `settings/SIGHTLINE_PHONE.yaml` and
+`vendor/pyslam/data/videos/phone_walk/walk.mp4` are left in place so the rehearsal can
+be repeated — both are gitignored and regenerable via `scripts/standin/`.
+
+Do not read the 0.83% as "better than KITTI". Upsampling adds no information; it changes
+what the ORB pyramid sees, and a single run of a monocular pipeline with RANSAC in it is
+not a measurement. The honest claim is that the plumbing is verified and 1250 is worse
+than 2000 on this clip.
 
 ---
 

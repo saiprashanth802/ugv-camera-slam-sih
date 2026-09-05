@@ -117,7 +117,14 @@ Host-side tools:
 ```bash
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
 ./.venv/bin/python scripts/calibrate_camera.py --images 'media/calib/*.jpg'
+./.venv/bin/python scripts/make_pyslam_settings.py phone_calib.yaml \
+    -o vendor/pyslam/settings/SIGHTLINE_PHONE.yaml
 ```
+
+The second step is not optional plumbing: `calibrate_camera.py` writes the ORB-SLAM3
+format and pySLAM cannot parse it — it fails on the `%YAML:1.0` header before reading a
+key, and namespaces intrinsics differently. `RUNBOOK.md` §7d has the details and the
+`config.yaml` block that goes with it.
 
 Calibration is validated against synthetic views from a known camera: it recovers
 fx = 900.28 against a true 900, at 0.070 px RMS.
@@ -132,8 +139,9 @@ fx = 900.28 against a true 900, at 0.070 px RMS.
 | `RUNBOOK.md` | Every command, each section carrying its own verification status and date. |
 | `docker/` | The `ugv-slam:demo` image, and the patch that gives the TurtleBot3 waffle a depth camera it does not ship with. |
 | `patches/` | The two mandatory pySLAM source fixes, with the reasoning in each patch header. |
-| `scripts/` | Calibration, trajectory scoring, goal selection, screen capture, GPU smoke test. |
+| `scripts/` | Calibration, pySLAM settings generation, trajectory scoring, goal selection, screen capture, GPU smoke test. |
 | `scripts/pyslam_build/` | The pySLAM environment build, stage by stage. |
+| `scripts/standin/` | Fabricates a stand-in clip and calibration so the phone-half pipeline can be rehearsed before real footage exists. Not part of the demo. |
 
 Not in version control, and regenerable: `vendor/` (14 GB upstream clone), `media/`
 (recordings), the built image tarball, and `phone_calib.yaml`.

@@ -233,12 +233,14 @@ RMS 0.070 px. The script and the YAML format are trustworthy.
 ### 7b. The walk  [UNVERIFIED]
 - Shoot **outdoors, in daylight** (SPEC §2 — this is the disclosed tested condition).
 - **Gimbal on.** Smooth motion is the single biggest factor in mono tracking survival.
-- Walk a **loop** and return to the start — loop closure is the visually impressive moment.
+- Walk a **loop** and return to the start. **Caveat: loop closure does not currently fire at
+  all** (§7c, known-bad) — walk the loop anyway so the footage is ready when it is fixed, but
+  do not build the narration around the loop visibly snapping shut.
 - Avoid: fast rotation with no translation (mono cannot triangulate from pure rotation —
   this is the classic way to lose tracking), blank walls, and large moving objects.
 - Lock the phone to one video mode so the intrinsics stay valid.
 
-### 7c. Run SLAM on the clip  [pySLAM build IN PROGRESS 2026-09-05]
+### 7c. Run SLAM on the clip  [pySLAM VERIFIED end to end 2026-09-05]
 **Do NOT compile ORB-SLAM3 at the venue** (SPEC §3, risk #1). Either way the phone map is
 played back from a **pre-recorded clip** — never live on stage.
 
@@ -304,6 +306,68 @@ docker exec pyslam-build bash -lc 'cd /pyslam && ./install_all.sh 2>&1 | tee ins
 It creates its venv at **`/root/.python/venvs/pyslam` inside the container**, NOT in the
 mounted repo — so the container must be `docker commit`ed (and `docker save`d) to keep
 the build. Destroying the container loses the install.
+
+#### Build constraints that cost a machine crash
+
+`make -j$(nproc)` is what OOM-killed this laptop mid-build. `nproc` reports **16**; the
+box has 14 GiB. Every build step here runs under a **`-j2` shim**. If you rebuild, keep
+it. `/home` sits at 89% (38 GB free), so watch it during any rebuild.
+
+The conda env lives at `/root/.python/venvs/` **inside** container `pyslam-build`, not in
+the mounted repo, and the container has been OOM-killed once. It survives a restart
+(`docker start pyslam-build`) but not a `docker rm`. Backups are on the USB drive, made
+with `docker export` (streams, needs no local layer — `docker commit` needs ~37 GB and
+will not fit).
+
+#### Two source patches are required — pySLAM does not work without them
+
+`vendor/` is gitignored, so `patches/` in this repo is the **only** durable record.
+After any fresh clone or rebuild:
+
+```bash
+./patches/apply_patches.sh      # idempotent; already-applied patches are skipped
+```
+
+| Patch | Fixes |
+|---|---|
+| `0001-map_point-fix-remove_frame_view-asserts` | Two `__debug__` asserts in `MapPoint.remove_frame_view()` that no caller can satisfy. Killed the Python core at frame 13 (first outlier) and again at frame 93. |
+| `0002-use-gtsam-frontend-pose-optimizer` | The C++ core's g2o pose optimizer is **inert on this build** — it never writes the optimised pose back, so 100% of points were flagged outliers and tracking reset 152 times. Switches `kOptimizationFrontEndUseGtsam` to True. |
+
+#### Measured results on KITTI 06, both cores, after the patches
+
+Both cores now process **1101/1101 frames with 1 lost frame (0.09%)** and 0 SLAM resets.
+Score them with `scripts/eval_trajectory.py` (Umeyama sim3 alignment — monocular has no
+metric scale, so a raw position diff is meaningless):
+
+```bash
+python scripts/eval_trajectory.py results/<run>/trajectory_final.txt \
+                                  data/videos/kitti06/groundtruth.txt
+```
+
+| Core | s/frame | APE RMSE vs groundtruth | % of 1222 m path |
+|---|---|---|---|
+| C++ + GTSAM (`PYSLAM_USE_CPP=true`, default) | **0.04** | **49.5 m** | **4.05%** |
+| Python (`PYSLAM_USE_CPP=false --headless`) | 0.19 | 132.7 m | 10.86% |
+
+**Use the C++ core.** It is 5x faster *and* 2.7x more accurate — which inverts the earlier
+assumption that the Python core was the "correct but slow" reference. The two agree with
+each other to 4.5% of path length, so they are running the same algorithm; the C++ one
+just optimises better. Keep the Python core as the fallback if `cpp_core.so` ever breaks.
+
+The earlier "20-30 s/frame" figure for the Python core was wrong — it included startup and
+the one-time vocabulary download. A full 1101-frame run takes about 4 minutes.
+
+#### Known-bad: loop closure never fires
+
+**0 loop closures across all 1101 frames of KITTI 06 — a sequence that demonstrably
+closes.** This is the direct cause of the 4% drift above; nothing ever corrects it.
+`pydbow3` builds and imports, so this is a live bug in a subsystem that has never once
+worked here, not a missing dependency.
+
+Consequences, both of which matter on stage:
+- The map will visibly drift on any loop you walk. Do not promise a closing loop.
+- SPEC §1 calls loop closure "the visually impressive moment". It is currently not
+  available. Plan the phone walk narration without it until this is fixed.
 
 #### Good news: the test sequence ships with the repo
 
@@ -373,7 +437,7 @@ Each rung is what you fall back to when the rung above fails. Test every rung (S
 | # | If this fails | Fall back to |
 |---|---|---|
 | 1 | Live Nav2 run in Gazebo | **`media/nav2_goal_run.mp4`** — recorded 2026-09-05 |
-| 2 | ORB-SLAM3 on the phone clip | pySLAM on the same clip (see §7c for build status) |
+| 2 | ORB-SLAM3 on the phone clip | **pySLAM, C++ core** — verified end to end on KITTI 06 (§7c). Needs `patches/` applied. |
 | 3 | Any live SLAM | **`media/map_building.mp4`** — recorded 2026-09-05 |
 | 4 | The laptop | Cloned backup machine (SPEC §8, owner C) |
 | 5 | Everything | The 3 slides + narration |

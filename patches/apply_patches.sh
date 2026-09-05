@@ -5,7 +5,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENDOR="$SCRIPT_DIR/../vendor/pyslam"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENDOR="$REPO_ROOT/vendor/pyslam"
 
 # Upstream has NO release tags, so the only stable reference is a commit hash.
 # These patches were generated against this exact tree; applying them to a moving

@@ -361,13 +361,78 @@ the one-time vocabulary download. A full 1101-frame run takes about 4 minutes.
 
 **0 loop closures across all 1101 frames of KITTI 06 — a sequence that demonstrably
 closes.** This is the direct cause of the 4% drift above; nothing ever corrects it.
-`pydbow3` builds and imports, so this is a live bug in a subsystem that has never once
-worked here, not a missing dependency.
+`pydbow3` builds and imports, so this is a live bug, not a missing dependency.
+
+Investigated 2026-09-05 and **localised, not fixed.** The pipeline is healthy right up
+to the last stage, which is worth knowing before anyone re-debugs it from the top:
+
+| Stage | Result |
+|---|---|
+| DBoW3 place recognition | **Works.** Runs on every keyframe, ~0.09 s each. |
+| Candidate detection | **Works.** 309 keyframes produced candidates (up to 4 each). |
+| Group consistency check | **Works.** 108 checks, candidates pass through. |
+| **RANSAC Sim3 geometry verification** | **Fails, always.** 173 candidates "didnt converge". |
+
+The failure signature is the interesting part: `num_inliers` is **0 in 159 of those 173
+cases**, while the same candidates carry a *median of 156* feature matches (p90 386,
+max 782). Only 75 candidates were thrown out for genuinely too few matches (min 20).
+Hundreds of matches yielding zero inliers is not what a merely hard scene looks like.
+
+**Tested and ruled out — the RANSAC iteration budget.** `loop_closing.py:298` calls
+`solvers[i].iterate(5)` exactly once per candidate although the solver above it is
+configured `set_ransac_parameters(0.99, 20, 300)`, i.e. 5 draws to find 20 inliers
+against a 300-iteration budget, with no loop back (upstream ORB-SLAM3 iterates until
+convergence or exhaustion). Raising it to `iterate(300)` **did not produce a single
+closure and made the run worse**: keyframes reaching loop closing collapsed 455 -> 24,
+relocalization attempts went to 1014 with 1010 failures, and lost frames rose 1 -> 5.
+The longer geometry check starves the shared loop-detection queue that relocalization
+also feeds from. Reverted. Do not retry this.
+
+**Remaining suspects, in order:** (a) the 3D map points handed to `Sim3Solver` are too
+poorly triangulated for a 3D-3D fit — plausible given monocular and the 4% drift;
+(b) a coordinate-frame or units mismatch in `solver_input_data` (`points_3d_w2`,
+`sigmas2_1/2`); (c) a bug in the `sim3solver` binding itself. Note the Sim3 optimizer
+switch (`kOptimizationLoopClosingUseGtsam`) is **not** a suspect — `optimize_sim3` is
+only reached *after* RANSAC converges, which never happens, so g2o-vs-GTSAM cannot be
+the cause here.
 
 Consequences, both of which matter on stage:
+
 - The map will visibly drift on any loop you walk. Do not promise a closing loop.
 - SPEC §1 calls loop closure "the visually impressive moment". It is currently not
   available. Plan the phone walk narration without it until this is fixed.
+
+#### Parked: the pangolin 3D viewer does not build
+
+Costs the 3D viewer only — **SLAM itself is unaffected**, and `--headless` is the flag
+that avoids it (`main_slam.py` sets `viewer3D = None`, so no X passthrough is needed).
+Without pangolin the phone half can produce trajectory plots but not the live
+"recognizable real SLAM look" that SPEC §1 asks for.
+
+Two separate causes, both traced 2026-09-05:
+
+1. **GCC 15 no longer transitively includes `<cstdint>`.** Nine headers/sources need it
+   added, not the eight in the earlier note — `include/pangolin/factory/factory_registry.h`
+   was missing from that list. **This part is solved**; driving the fix from the
+   compiler's own `note: 'uint32_t' is defined in header '<cstdint>'` diagnostics
+   converges without needing the list to be right.
+2. **The conda toolchain cannot see `/usr/include`.** `conda activate pyslam` puts
+   **g++ 15.3.0** on PATH (the *system* gcc is 13.3 — checking the wrong one is
+   misleading), and it compiles against `$CONDA_PREFIX/x86_64-conda-linux-gnu/sysroot`.
+   So `apt-get install libegl1-mesa-dev` installs headers the build genuinely cannot
+   find. Pangolin then fails on `EGL/egl.h`, and after that on `dc1394/conversions.h`,
+   and so on through its optional video drivers.
+
+**Do not set `CPATH=/usr/include` to bridge this.** It drags the system glibc headers
+into a conda-glibc build and every translation unit dies on `bits/timesize.h`. Copying
+just the needed headers (`EGL/`, `KHR/`) into `$CONDA_PREFIX/include` is the safe
+version and is already done.
+
+The next thing to try is **disabling pangolin's optional video drivers at configure
+time** rather than satisfying them one at a time — the dc1394 (FireWire camera) driver
+is not something this demo needs. Installing the missing libs into the conda env was
+deliberately *not* attempted: that env is the only thing that runs SLAM, and dependency
+churn in it is a worse risk than a missing viewer.
 
 #### Good news: the test sequence ships with the repo
 

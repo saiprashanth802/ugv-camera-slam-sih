@@ -29,10 +29,13 @@ needs `-j1`, not `-j2` — hence the two different shim values.
 
 ## Order they were actually run in
 
-Everything before this is RUNBOOK §7c: install conda first, then `./install_all.sh`,
-which takes its conda branch and creates the env at Python 3.11.
+**Stage 0 is `00_bootstrap.sh`** — run that first, from the repo root. It clones the
+pinned upstream tree, applies `patches/`, creates the container, installs conda (which
+is what makes upstream's installer take its working branch), and runs `install_all.sh`.
+Everything below resumes from where that stops.
 
 | # | Script | Why it exists |
+| 0 | `00_bootstrap.sh` | Pinned clone + patches + container + conda + `install_all.sh`. Assembled from the commands that worked, but never run start-to-finish on a clean machine. |
 |---|---|---|
 | 1 | `resume_build.sh` | The main resume: GTSAM `make` (restarted at 61%), `make install`, `python-install`, then `gtsam_factors` and the pySLAM C++ core. |
 | 2 | `build_gtsam_py.sh` | GTSAM's Python bindings came out corrupt — the `.so` existed but had no `PyInit` symbol. Purges the artifacts and rebuilds at `-j1`. |
@@ -42,7 +45,7 @@ which takes its conda branch and creates the env at Python 3.11.
 
 ## Status
 
-Every script here succeeded when it was run, and the environment they produced runs
+Stage 0 is a reconstruction; stages 1-5 each succeeded when they were run, and the environment they produced runs
 KITTI 06 end to end on both cores (RUNBOOK §7c). **The sequence as a whole has not been
 re-run from a clean clone**, so treat the order above as a record of what worked, not as
 a tested one-shot installer.

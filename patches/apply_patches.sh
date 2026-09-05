@@ -7,9 +7,39 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENDOR="$SCRIPT_DIR/../vendor/pyslam"
 
+# Upstream has NO release tags, so the only stable reference is a commit hash.
+# These patches were generated against this exact tree; applying them to a moving
+# master is how you get a silent half-application months from now.
+UPSTREAM_COMMIT="a5ff2562eb929ed9a08420f528a120a3cca65585"
+
 if [[ ! -d "$VENDOR" ]]; then
-    echo "ERROR: $VENDOR not found. Clone luigifreda/pyslam there first." >&2
+    cat >&2 <<EOF
+ERROR: $VENDOR not found.
+
+Clone the pinned upstream tree first:
+
+  git clone https://github.com/luigifreda/pyslam.git "$VENDOR"
+  git -C "$VENDOR" checkout $UPSTREAM_COMMIT
+  git -C "$VENDOR" submodule update --init --recursive
+
+Then re-run this script. See RUNBOOK.md section 7c for the full build.
+EOF
     exit 1
+fi
+
+# Refuse to patch a tree that is not the one these patches were made against.
+# Override with ALLOW_COMMIT_MISMATCH=1 if you have deliberately moved upstream and
+# are prepared to fix up the rejects by hand.
+actual="$(git -C "$VENDOR" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [[ "$actual" != "$UPSTREAM_COMMIT" ]]; then
+    if [[ "${ALLOW_COMMIT_MISMATCH:-0}" == "1" ]]; then
+        echo "WARNING: upstream is $actual, expected $UPSTREAM_COMMIT -- continuing anyway" >&2
+    else
+        echo "ERROR: $VENDOR is at commit $actual" >&2
+        echo "       these patches were generated against $UPSTREAM_COMMIT" >&2
+        echo "       check that commit out, or set ALLOW_COMMIT_MISMATCH=1 to force." >&2
+        exit 1
+    fi
 fi
 
 rc=0

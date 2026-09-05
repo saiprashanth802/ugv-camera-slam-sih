@@ -1,0 +1,18 @@
+# Host-side Python dependencies (the .venv at the repo root).
+#
+# These cover the two scripts that run on the HOST:
+#   scripts/calibrate_camera.py   chessboard calibration -> ORB-SLAM3 intrinsics YAML
+#   scripts/eval_trajectory.py    Umeyama sim3 trajectory scoring
+#
+# Versions are the ones the results in README.md were produced with.
+#
+#   python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
+#
+# NOT installable from here, by design:
+#   scripts/pick_goal.py     imports rclpy / nav_msgs / tf2_ros -- run it INSIDE the
+#                            ugv-slam:demo container, where ROS 2 Humble provides them.
+#   scripts/record_screen.py imports gi (PyGObject) and talks to GNOME's screencast
+#                            D-Bus API -- it needs the host's system python3, not this
+#                            venv. On Fedora: sudo dnf install python3-gobject
+numpy==2.5.2
+opencv-python==5.0.0.93

@@ -1,0 +1,52 @@
+Fix: two debug asserts in MapPoint.remove_frame_view that cannot hold for its callers
+
+remove_frame_view() performs its removal in two stages: it validates and drops the
+back-reference while holding _lock_features, then calls frame.remove_point_match(idx)
+afterwards, outside the lock. Both __debug__ asserts inside the locked section state
+conditions that depend on that later call, or on what the caller did beforehand -- and
+the two callers disagree, so no single pre-state satisfies both.
+
+1) assert self == frame.get_point_match(idx)
+   Frame.clean_outlier_map_points() (frame.py:1029) sets self.points[i] = None BEFORE
+   calling, so the match is already gone and the assert fires. On KITTI 06 this aborts
+   the run at frame 13, the first frame where pose optimization reports outliers
+   ("found 5 bad points").
+   -> relaxed to accept the already-cleared case, while still catching a genuine
+      mismatch (a *different* point at that index fails both comparisons).
+
+2) assert not self in frame.get_points()
+   Frame.remove_frame_views() (frame.py:918) does NOT pre-null the entry, so the point
+   is legitimately still present and the assert fires. It is a post-condition being
+   checked before the removal it describes; it only passed for caller (1) by accident,
+   because that caller happened to pre-null.
+   -> rewritten as the invariant the comment actually describes ("no multiple
+      instances"): the point occupies at most one index. Holds for both callers,
+      and still fails if the same point is genuinely matched at two indices.
+   Cost is unchanged: the original "in" test was already an O(n) __eq__ scan.
+
+Both relaxed rather than deleted, and PYTHONOPTIMIZE=1 was rejected, because that
+would disable every __debug__ assert in pySLAM -- and these asserts have been useful.
+
+The work after the asserts is correct for both callers: Frame.remove_point_match() is
+an idempotent "self.points[idx] = None" (frame.py:895).
+
+Upstream: luigifreda/pyslam master @ a5ff256 (no release tags exist).
+
+diff --git a/pyslam/slam/map_point.py b/pyslam/slam/map_point.py
+index 05164f9..670369c 100644
+--- a/pyslam/slam/map_point.py
++++ b/pyslam/slam/map_point.py
+@@ -278,11 +278,11 @@ class MapPointBase(object):
+             # remove point from frame
+             if idx is not None:
+                 if __debug__:
+-                    assert self == frame.get_point_match(idx)
++                    assert frame.get_point_match(idx) in (self, None)
+                 frame_remove_point_match = True
+                 if __debug__:
+                     assert (
+-                        not self in frame.get_points()
++                        sum(1 for q in frame.get_points() if q == self) <= 1
+                     )  # checking there are no multiple instances
+             else:
+                 frame_remove_point = True

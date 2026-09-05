@@ -1,0 +1,41 @@
+Fix: use the GTSAM pose optimizer in the frontend, not g2o
+
+The C++ core's g2o pose optimizer is a no-op on this build. Reproduced in upstream's
+own unit test (pyslam/slam/cpp/tests_py/test_slam_cpp_optimize_pose.py) on synthetic
+data with correct intrinsics:
+
+    g2o   : R diff 0.4129, t diff 0.5196, RMSE 156.3355750 -> 156.3355750  (FAIL)
+    GTSAM : R diff 0.000303, t diff 0.000959, RMSE 156.3355750 -> 0.6816   (OK)
+
+RMSE bit-identical before/after proves g2o never updates the frame pose. In the live
+pipeline this made every reprojection error stay huge, so pose optimization flagged
+100% of points as outliers ("available 54 points, found 54 bad points"), matched map
+points fell to 0, and tracking failed and reset 152 times over KITTI 06.
+
+kOptimizationFrontEndUseGtsam was False, selecting the broken g2o path. GTSAM is built
+and verified working here, so switch the frontend to it.
+
+Scope: frontend pose optimization only. kOptimizationBundleAdjustUseGtsam and
+kOptimizationLoopClosingUseGtsam are left False -- those g2o paths are untested here
+and should be changed only on evidence.
+
+Not investigated: WHY the statically-linked g2o is inert (1133 g2o symbols are present
+in cpp_core.so, so it is not a linkage failure). Left alone because GTSAM works.
+
+Upstream: luigifreda/pyslam master @ a5ff256 (no release tags exist).
+Note: repo-root config_parameters.py is a SYMLINK to pyslam/config_parameters.py.
+Patch the real file; sed -i on the symlink replaces it with a regular file.
+
+diff --git a/pyslam/config_parameters.py b/pyslam/config_parameters.py
+index 60de174..5416ab2 100644
+--- a/pyslam/config_parameters.py
++++ b/pyslam/config_parameters.py
+@@ -204,7 +204,7 @@ class Parameters:
+     # ================================================================
+     kOptimizationAllUseGtsam = False  # Use GTSAM for all optimization tasks (it seems to have problems under mac, TODO: fix it)
+     kOptimizationFrontEndUseGtsam = (
+-        False or kOptimizationAllUseGtsam
++        True or kOptimizationAllUseGtsam
+     )  # Use GTSAM in pose optimization in the frontend
+     kOptimizationBundleAdjustUseGtsam = (
+         False or kOptimizationAllUseGtsam

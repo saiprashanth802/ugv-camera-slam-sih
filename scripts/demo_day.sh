@@ -155,29 +155,31 @@ for w in /root/*_ws /opt/*_ws; do [ -f "$w/install/setup.bash" ] && source "$w/i
 dexec() { docker exec "$CONTAINER" bash -c "$ROS_PRELUDE $1"; }
 
 live_nav2() {
-  local deadline=$(( $(date +%s) + LIVE_TIMEOUT ))
+  local t0=$(date +%s)
+  local deadline=$(( t0 + LIVE_TIMEOUT ))
+  step() { printf '  [%3ds] %s\n' "$(( $(date +%s) - t0 ))" "$1"; }
   # seconds left on the single hard deadline for the whole live attempt; never
   # returns <=0, because `timeout 0` means "no timeout" and would hang the demo.
   left() { local r=$(( deadline - $(date +%s) )); [ "$r" -gt 0 ] && echo "$r" || echo 0; }
 
   docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "  image $IMAGE absent"; return 1; }
 
-  echo "  starting container..."
+  step "starting container..."
   "$WS/scripts/run_demo.sh" --detach >/dev/null 2>&1 || { echo "  container failed to start"; return 1; }
 
-  echo "  checking the GPU..."
+  step "checking the GPU..."
   if ! dexec 'bash /ws/scripts/check_gpu.sh' 2>/dev/null | grep -q '^PASS'; then
     echo "  ${Y}GPU check did not PASS${N} — Gazebo would render on the iGPU"
     return 1
   fi
 
-  echo "  launching Gazebo + RTAB-Map + Nav2 (this is the slow part)..."
+  step "launching Gazebo + RTAB-Map + Nav2 (this is the slow part)..."
   docker exec -d "$CONTAINER" bash -c \
     "$ROS_PRELUDE export TURTLEBOT3_MODEL=waffle;
      ros2 launch rtabmap_demos turtlebot3_sim_rgbd_demo.launch.py > /tmp/nav2.log 2>&1" \
     || { echo "  launch failed"; return 1; }
 
-  echo -n "  waiting for /map"
+  step "waiting for /map"; echo -n "  "
   while [ "$(left)" -gt 0 ]; do
     if dexec 'ros2 topic list 2>/dev/null' | grep -qx '/map'; then
       if timeout 20 docker exec "$CONTAINER" bash -c \
@@ -189,9 +191,22 @@ live_nav2() {
   done
   [ "$(left)" -gt 0 ] || { echo; echo "  ${Y}timed out waiting for /map${N}"; return 1; }
 
+  # planner_server comes up with use_sim_time FALSE while every other Nav2 node
+  # and rtabmap have it TRUE (measured 2026-09-06; /clock publishes fine at 10 Hz).
+  # The planner then stamps its path with wall-clock time, controller_server reads
+  # it as sim time, calls the data "too old" when converting map->odom, never
+  # follows the path, and the goal ABORTs with "Failed to make progress" -- which
+  # reads like an unreachable goal but is not: the planner produced a path fine.
+  step "normalising use_sim_time across Nav2..."
+  local n
+  for n in /planner_server /controller_server /bt_navigator /behavior_server \
+           /smoother_server /velocity_smoother; do
+    dexec "ros2 param set $n use_sim_time true" >/dev/null 2>&1
+  done
+
   # Never hand-guess a goal: RUNBOOK section 4 records (-1.0, -0.3) looking like
   # open floor, sitting inside a wall, and aborting every single time.
-  echo "  choosing a reachable goal..."
+  step "choosing a reachable goal..."
   local goal x y
   goal="$(timeout 60 docker exec "$CONTAINER" bash -c \
             "$ROS_PRELUDE python3 /ws/scripts/pick_goal.py" 2>/dev/null \
@@ -200,7 +215,7 @@ live_nav2() {
   [ -n "$x" ] && [ -n "$y" ] || { echo "  ${Y}pick_goal.py returned no goal${N}"; return 1; }
   echo "  goal: ($x, $y)"
 
-  echo "  sending it..."
+  step "sending it ($(left)s left on the deadline)"
   local out
   [ "$(left)" -gt 0 ] || { echo "  ${Y}out of time before sending the goal${N}"; return 1; }
   out="$(timeout "$(left)" docker exec "$CONTAINER" bash -c \
@@ -208,15 +223,31 @@ live_nav2() {
      \"{pose: {header: {frame_id: map}, pose: {position: {x: $x, y: $y}, orientation: {w: 1.0}}}}\"" 2>&1)"
 
   if echo "$out" | grep -qiE 'result.*succeeded|Goal finished with status: SUCCEEDED'; then
-    echo "  ${G}goal reached — that was live${N}"
+    step "${G}goal reached — that was live${N}"
     return 0
   fi
   if echo "$out" | grep -qi 'Goal accepted'; then
-    echo "  ${Y}goal accepted but did not report success in time${N}"
+    step "${Y}goal accepted but did not succeed${N}"
+    diagnose_live "$out"
     return 1
   fi
-  echo "  ${Y}goal was rejected${N}"
+  step "${Y}goal was rejected${N}"
+  diagnose_live "$out"
   return 1
+}
+
+# Why the live run failed, printed before the container is torn down. Without
+# this the fallback is silent and the same failure gets rediagnosed from scratch
+# next time -- at a venue, with no time.
+diagnose_live() {
+  echo "  ${D}--- why it failed ---${N}"
+  echo "$1" | grep -aiE 'status|result|aborted|canceled' | tail -4 | sed 's/^/    /'
+  docker exec "$CONTAINER" bash -c \
+    'grep -aiE "GridBased failed|Goal failed|aborted|no valid path|Failed to make progress|collision" /tmp/nav2.log | tail -6' \
+    2>/dev/null | sed 's/^/    /'
+  docker exec "$CONTAINER" bash -c \
+    "source /opt/ros/humble/setup.bash 2>/dev/null; timeout 8 ros2 topic echo --once --field info /map 2>/dev/null | grep -E '^(width|height|resolution)'" \
+    2>/dev/null | sed 's/^/    map /'
 }
 
 # -------------------------------------------------------------- segments ---

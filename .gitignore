@@ -8,6 +8,22 @@ media/calib/*
 !media/calib/*.yaml
 # The checkerboard docs/CAMERA_DAY.md tells the shooter to use. No generator exists.
 !media/calib_board_9x6.png
+# The 2026-09-06 demo renders. Committed deliberately despite the rule above: on
+# demo day the video IS the deliverable, and a repo that documents a demo it does
+# not contain is one clone away from being useless. ~144 MiB, plain git, NOT LFS --
+# a teammate cloning without git-lfs would get pointer files instead of videos,
+# which is a worse failure than a large repo. Regenerable from scripts/ plus the
+# archived runs, but only while the container survives.
+!media/phone_walk_slam_demo.mp4
+!media/phone_walk_slam_demo_small.mp4
+!media/phone_walk_map_3d.mp4
+!media/kitti06_gt_demo.mp4
+!media/kitti06_gt_demo_3x.mp4
+!media/phone_walk_clip_selection.png
+# NOT committed: media/map_building.mp4 is 100.7 MiB, over GitHub's 100 MiB hard
+# per-file limit. It would need LFS. It stays on the USB backup and in media.tar.gz.
+# NOT committed: media/nav2_goal_run.mp4 was deleted 2026-09-06 07:43; the copy in
+# ~/.local/share/Trash is the only one outside the USB media.tar.gz.
 *.tar.gz
 docker/build.log
 __pycache__/

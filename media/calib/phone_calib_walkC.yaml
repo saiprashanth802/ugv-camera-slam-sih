@@ -1,0 +1,56 @@
+%YAML:1.0
+# Sightline phone calibration — ESTIMATED, NOT CHESSBOARD-MEASURED.
+#
+# Clip C (5.43.59 AM (1)), 1280x544, 169 s. Intrinsics recovered from the footage
+# by orthogonal-vanishing-point geometry (scripts/estimate_focal_vp.py), same
+# method as walkA/walkB.
+#
+# LOWER CONFIDENCE THAN A OR B. Only 31 frames yielded a usable orthogonal VP
+# pair here (A: 94, B: 51), and the interquartile range is wide: f 789-1266 px
+# around a median of 986.5. The resulting f/width = 0.771 also sits below A's
+# 0.838 and B's 0.867, so the three clips agree less well than A and B alone
+# suggest. Treat the +/-10% confidence quoted for A and B as optimistic here.
+#
+# C shares B's 1280x544 frame, so if a single number is ever needed for both,
+# B's better-supported f=1110.2 is the defensible one -- but each file records
+# its own measurement rather than borrowing, so the disagreement stays visible.
+#
+# Distortion ASSUMED ZERO; principal point ASSUMED CENTRED. cy is the weakest
+# number in the file: 1280x544 is 2.353:1 and may be a vertical crop, which
+# leaves the centred assumption valid only if that crop was symmetric.
+
+File.version: "1.0"
+
+Camera.type: "PinHole"
+Camera1.fx: 986.500000
+Camera1.fy: 986.500000
+Camera1.cx: 640.000000
+Camera1.cy: 272.000000
+
+Camera1.k1: 0.0
+Camera1.k2: 0.0
+Camera1.p1: 0.0
+Camera1.p2: 0.0
+Camera1.k3: 0.0
+
+Camera.width: 1280
+Camera.height: 544
+Camera.fps: 30
+Camera.RGB: 1
+
+ORBextractor.nFeatures: 2000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0

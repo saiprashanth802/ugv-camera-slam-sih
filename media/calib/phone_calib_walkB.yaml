@@ -1,0 +1,53 @@
+%YAML:1.0
+# Sightline phone calibration — ESTIMATED, NOT CHESSBOARD-MEASURED.
+#
+# No calibration stills were shot for the clip B (5.33.42 AM) walk, so these intrinsics were
+# recovered from the footage itself by orthogonal-vanishing-point geometry over
+# sharp frames (corridor floor joints / wall edges / handrails give two
+# orthogonal world directions; with c at the image centre and square pixels,
+# f^2 = -(v1-c).(v2-c)).  Median over the run; see scripts/estimate_focal_vp.py.
+#
+# Cross-check: the two WhatsApp clips were measured independently and agree at
+# f/width = 0.838 and 0.867 (HFOV 61.7 deg and 59.9 deg) despite different
+# capture resolutions — consistent with one phone, one lens.
+#
+# Confidence: focal good to roughly +/-10%.  Distortion is ASSUMED ZERO (phone
+# video pipelines correct it in-camera) and the principal point is ASSUMED
+# CENTRED.  Replace this file with a real calibrate_camera.py run (RUNBOOK 7a)
+# before quoting any number from it as measured.
+
+File.version: "1.0"
+
+Camera.type: "PinHole"
+Camera1.fx: 1110.200000
+Camera1.fy: 1110.200000
+Camera1.cx: 640.0
+Camera1.cy: 272.0
+
+Camera1.k1: 0.0
+Camera1.k2: 0.0
+Camera1.p1: 0.0
+Camera1.p2: 0.0
+Camera1.k3: 0.0
+
+Camera.width: 1280
+Camera.height: 544
+Camera.fps: 30
+Camera.RGB: 1
+
+ORBextractor.nFeatures: 2000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0

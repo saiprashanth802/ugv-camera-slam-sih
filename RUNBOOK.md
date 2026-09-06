@@ -118,6 +118,20 @@ Result on this machine: goal accepted, robot drove from (-3.15, 2.04) to (-1.25,
 against a target of (-1.0, 1.0). In the demo you do this by clicking **2D Goal Pose**
 in RViz instead. Rehearse the click until it is muscle memory, and record a backup capture.
 
+### If the robot accepts the goal and then does not move  [2026-09-06]
+
+`controller_server: Failed to make progress` + `Goal failed` + `ABORTED`, with
+**no** `GridBased failed to generate a valid path` line, is not a bad goal. It is
+`planner_server` running with `use_sim_time: false` while everything else uses sim
+time. Fix it and re-send:
+
+```bash
+ros2 param set /planner_server use_sim_time true
+```
+
+Full mechanism and the 2-vs-2 measurement in §11. `scripts/demo_day.sh` does this
+automatically; a hand-driven demo does not.
+
 ### Choosing a goal that will actually plan  [VERIFIED 2026-09-05]
 
 Do not hand-guess goal coordinates. Verified on this machine: the goal `(-1.0, -0.3)`
@@ -1064,12 +1078,55 @@ Decoding is checked, not just probed — Fedora's openh264 fails on some inputs
 that `ffprobe` reports as fine (§7f hit exactly this on the KITTI source), so
 `--check` confirms the player can actually decode each file.
 
-### Segment 4, the live path
+### Segment 4, the live path  [VERIFIED 2026-09-06, 2/2 clean runs]
 
 `run_demo.sh --detach` → `check_gpu.sh` must PASS on the RTX 4060 → launch
-`rtabmap_demos turtlebot3_sim_rgbd_demo.launch.py` → wait for `/map` → run
-`pick_goal.py` → `send_goal`. **Any failure or the deadline expiring tears the
-container down and plays the recording**, with a line saying it fell back.
+`rtabmap_demos turtlebot3_sim_rgbd_demo.launch.py` → wait for `/map` →
+**normalise `use_sim_time`** (see below) → run `pick_goal.py` → `send_goal`.
+**Any failure or the deadline expiring tears the container down and plays the
+recording**, with a line saying it fell back.
+
+Whole thing takes ~31 s: container and launch are ~1 s, `/map` arrives at ~8 s,
+the goal is chosen by ~17 s, sent at ~20 s, reached at ~31 s.
+
+#### The bug automating this exposed: planner_server is on the wrong clock
+
+`planner_server` comes up with **`use_sim_time: false`** while every other Nav2
+node, both costmaps and `rtabmap` have it **true**, and `/clock` publishes fine
+at 10 Hz. The planner then stamps its path with wall-clock time (~1.79e9 s),
+`controller_server` reads it against sim time (~13 s), calls the data too old
+when converting `map -> odom`, never follows the path, and the goal **ABORTs**:
+
+```
+controller_server: Failed to make progress     (repeatedly)
+bt_navigator:      Goal failed
+Goal finished with status: ABORTED
+```
+
+**This does not look like a clock problem, which is the trap.** "Failed to make
+progress" reads like a robot boxed in by obstacles, so the goal and the
+half-built map are the obvious suspects — and both are innocent. The tell is
+that there is **no `GridBased failed to generate a valid path`** anywhere: the
+planner did its job, the controller could not act on the result. Contrast §4's
+unreachable-goal failure, which *does* print that line.
+
+`demo_day.sh` sets `use_sim_time: true` on the six Nav2 lifecycle nodes after
+the stack is up and before the goal is sent. Measured on the identical goal
+`(0.05, 0.25)`:
+
+| | Without the fix | With it |
+|---|---|---|
+| Runs | 2 | 2 |
+| Outcome | ABORTED both times, after 168 s | reached both times, in 10-11 s |
+
+A 900 s deadline on an unfixed run still aborted at 168 s, so this was never the
+timeout — the action returned, having given up.
+
+**Why §4 says "VERIFIED end to end" and was not lying:** that verification was
+driven by hand, clicking *2D Goal Pose* in RViz, where a stalled controller just
+looks like a slow robot and you re-click. The mismatch was always there;
+automating the goal is what turned it into a hard abort. If you drive the demo
+manually and it stalls, this is why — set the param and re-click.
 
 The goal comes from `pick_goal.py`, never from a hand-guess — §4 records
 `(-1.0, -0.3)` looking like open floor, sitting inside a wall, and aborting every

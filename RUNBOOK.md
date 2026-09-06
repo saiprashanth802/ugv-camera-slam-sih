@@ -120,6 +120,20 @@ in RViz instead. Rehearse the click until it is muscle memory, and record a back
 
 ### If the robot accepts the goal and then does not move  [2026-09-06]
 
+**What you SEE:** the robot drives normally for a while, then stops dead near
+wherever it got to, sits still for tens of seconds, and then **spins or reverses a
+short distance on the spot** before aborting. That is not the robot being blocked
+— it is `bt_navigator` running its recovery subtree (spin / back up / clear
+costmap) because the controller reported no progress. Reproduced deliberately
+2026-09-06: drove 8.0 m fine, froze for 50 s, then backed up 0.30 m and returned,
+with 10x `Failed to make progress`.
+
+**Do not go looking at the costmap or the doorways for this.** That was tried:
+`turtlebot3_house` doorways are 0.9 m and `inflation_radius` is 0.55 m, which
+makes a tidy argument that no zero-cost path exists through them — and it is
+wrong. With the clock fixed, the robot drives those same doorways 8 times out of
+8 without a single recovery.
+
 `controller_server: Failed to make progress` + `Goal failed` + `ABORTED`, with
 **no** `GridBased failed to generate a valid path` line, is not a bad goal. It is
 `planner_server` running with `use_sim_time: false` while everything else uses sim

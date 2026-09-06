@@ -1,0 +1,75 @@
+diff --git a/main_slam.py b/main_slam.py
+index ff3e03a..5dcfa7f 100755
+--- a/main_slam.py
++++ b/main_slam.py
+@@ -538,6 +538,70 @@ if __name__ == "__main__":
+         print("Exception while computing metrics: ", e)
+         print(f"traceback: {traceback.format_exc()}")
+ 
++    # --- Sightline: dump the sparse map on a headless run -------------------------
++    # Upstream only ever sets is_map_save from the 3D GUI checkbox (see
++    # `is_map_save = viewer3D.is_map_save() ...` above), and --headless sets
++    # viewer3D = None -- so a headless run builds a full map and then throws it
++    # away. pangolin does not build on this box (RUNBOOK 7c), so the GUI path is
++    # not available to us at all.
++    #
++    # save_system_state() is the upstream way to persist a map, but with
++    # USE_CPP_CORE=true it writes map["map"] as one ESCAPED JSON STRING ~440 MB
++    # long. Streaming parsers see a single scalar, so reading it back costs a
++    # multi-GB materialisation on a box that has been OOM-killed before. A 3D view
++    # needs point positions, point colours and keyframe centres and nothing else,
++    # so dump exactly those, straight out of memory, as a ~200 KB npz.
++    #
++    # MUST run AFTER the final-trajectory metrics block, not before it: the map
++    # lock is contended until local mapping drains.
++    if os.environ.get("PYSLAM_DUMP_MAP", "").lower() in ("1", "true", "yes"):
++        try:
++            import numpy as _np
++
++            # Local mapping is still running here and holds the map lock; reading
++            # the map without waiting deadlocks the run (observed: online
++            # trajectory complete, trajectory_final.txt empty, ~2% CPU forever).
++            # save_system_state() does exactly this wait for the same reason.
++            slam.tracking.wait_for_local_mapping(timeout=1, check_on_exit=True)
++            time.sleep(1)
++
++            _pts, _cols = [], []
++            for _p in slam.map.get_points():
++                if _p is None or _p.is_bad():
++                    continue
++                _pts.append(_np.asarray(_p.pt(), dtype=_np.float32))   # pt() is a METHOD
++                _c = getattr(_p, "color", None)
++                _cols.append(
++                    _np.asarray(_c, dtype=_np.float32)
++                    if _c is not None
++                    else _np.array([200.0, 200.0, 200.0], _np.float32)
++                )
++            _kf = [
++                _np.asarray(_k.Ow(), dtype=_np.float32)                # Ow() is a METHOD
++                for _k in slam.map.get_keyframes()
++                if _k is not None and not _k.is_bad()
++            ]
++            _out = os.path.join(metrics_save_dir, "map_lite.npz")
++            _np.savez_compressed(
++                _out,
++                points=_np.array(_pts, _np.float32),
++                colors=_np.array(_cols, _np.float32),
++                kf_centers=_np.array(_kf, _np.float32),
++            )
++            Printer.green(
++                f"Sightline: map dumped -> {_out} "
++                f"({len(_pts)} points, {len(_kf)} keyframes)"
++            )
++        except Exception as e:
++            # stdout is lost when the process exits without flushing, so also
++            # leave the reason on disk next to where the npz should have been.
++            Printer.red(f"Sightline: map dump FAILED: {e}")
++            try:
++                with open(os.path.join(metrics_save_dir, "map_dump_error.txt"), "w") as _f:
++                    _f.write(traceback.format_exc())
++            except Exception:
++                pass
++
+     # close stuff - ensure proper shutdown order
+     # First stop SLAM (which stops all processes and shuts down their managers)
+     slam.quit()

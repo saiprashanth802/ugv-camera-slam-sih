@@ -1,5 +1,13 @@
 .venv/
-media/
+# media/ holds recordings (regenerable, large). The calibration YAMLs under
+# media/calib/ are neither: they are the archival record of what the camera
+# measured, and for the 2026-09-06 walk they are the ONLY record of it.
+media/*
+!media/calib/
+media/calib/*
+!media/calib/*.yaml
+# The checkerboard docs/CAMERA_DAY.md tells the shooter to use. No generator exists.
+!media/calib_board_9x6.png
 *.tar.gz
 docker/build.log
 __pycache__/

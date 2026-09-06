@@ -16,9 +16,11 @@ estimated. Where something does not work, it says so.
 
 ## What is demonstrated
 
-**Half A — perception on real imagery.** Monocular visual SLAM on outdoor phone footage:
-a sparse 3D map and camera trajectory recovered from a single moving camera, with no
-depth sensor and no positioning.
+**Half A — perception on real imagery.** Monocular visual SLAM on phone footage: a sparse
+3D map and camera trajectory recovered from a single moving camera, with no depth sensor
+and no positioning. The scored numbers below are KITTI; the phone clips we hold today were
+shot before sunrise on a covered walkway and an indoor corridor, **not** in the outdoor
+daylight condition SPEC §2 discloses (`RUNBOOK.md` §7e).
 
 **Half B — the autonomy loop, live.** In Gazebo, RTAB-Map builds an occupancy grid from
 the robot's camera and Nav2 plans and drives to a commanded goal pose with obstacle
@@ -41,6 +43,18 @@ monocular, which recovers no metric scale. Reproduce with `scripts/eval_trajecto
 | Python core (fallback) | 0.19 | 132.7 m | 10.86 % | 1101 / 1101, 1 lost (0.09 %) |
 
 Map built: 321 keyframes, 11,893 points, 0 SLAM resets.
+
+Phone walk clips, run through the same engine 2026-09-06. **A phone walk has no ground
+truth, so there is no trajectory-error figure here** — these are tracking-survival numbers
+only, and the intrinsics behind them are estimated rather than measured (`RUNBOOK.md` §7e).
+
+| Clip | Native | Frames tracked | Poses, online → final |
+|---|---|---|---|
+| A — 65 s, covered walkway | 848×478 | 1953 / 1953, 1 lost (0.05 %) | 1938 → 1889 |
+| B — 126 s, indoor corridor | 1280×544 | 3771 / 3771, 3 lost (0.08 %) | 3707 → **1648** |
+
+Clip B's final map discards 56 % of its online poses after a failed relocalization — the
+gap between those two columns is the honest read, not `percent_lost`.
 
 Autonomous navigation, Gazebo `turtlebot3_house`:
 
@@ -137,9 +151,10 @@ fx = 900.28 against a true 900, at 0.070 px RMS.
 |---|---|
 | `SPEC.md` | Every locked decision with its reasoning, plus the risks and the rejected alternatives. |
 | `RUNBOOK.md` | Every command, each section carrying its own verification status and date. |
+| `docs/CAMERA_DAY.md` | The field card handed to whoever shoots the phone footage. Written for a non-engineer; assumes no knowledge of the project. |
 | `docker/` | The `ugv-slam:demo` image, and the patch that gives the TurtleBot3 waffle a depth camera it does not ship with. |
 | `patches/` | The two mandatory pySLAM source fixes, with the reasoning in each patch header. |
-| `scripts/` | Calibration, pySLAM settings generation, trajectory scoring, goal selection, screen capture, GPU smoke test. |
+| `scripts/` | Calibration, pySLAM settings generation, focal recovery from vanishing points, dataset switching, trajectory scoring, goal selection, screen capture, GPU smoke test. |
 | `scripts/pyslam_build/` | The pySLAM environment build, stage by stage. |
 | `scripts/standin/` | Fabricates a stand-in clip and calibration so the phone-half pipeline can be rehearsed before real footage exists. Not part of the demo. |
 
@@ -154,7 +169,9 @@ Not in version control, and regenerable: `vendor/` (14 GB upstream clone), `medi
 |---|---|
 | Loop closure | Localised to RANSAC Sim3 geometry verification; suspects ranked in `RUNBOOK.md` §7c. One hypothesis tested and disproved. |
 | Pangolin 3D viewer | Does not build — conda's GCC 15 toolchain cannot see the system EGL headers. `--headless` avoids it; costs the 3D view, not the SLAM. |
-| Outdoor walk footage | Not yet shot. |
+| Outdoor walk footage | **Shot 2026-09-06, but not to brief** — pre-dawn, covered walkway and indoor corridor, delivered via WhatsApp, no chessboard stills. Both clips run end to end; the open item is a reshoot to `docs/CAMERA_DAY.md`. `RUNBOOK.md` §7e. |
+| Phone intrinsics | Estimated from orthogonal vanishing points, ±10 %, against 0.03 % from a board. Distortion assumed zero, principal point assumed centred. `scripts/estimate_focal_vp.py`. |
+| Third walk take | Clip C — 169 s, the longest of the three — has never been run through the pipeline. |
 
 ## Roadmap
 

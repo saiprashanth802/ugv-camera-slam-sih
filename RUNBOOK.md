@@ -1001,7 +1001,8 @@ Each rung is what you fall back to when the rung above fails. Test every rung (S
 
 | # | If this fails | Fall back to |
 |---|---|---|
-| 1 | Live Nav2 run in Gazebo | **`media/nav2_goal_run.mp4`** — recorded 2026-09-05 |
+| 0 | — | **`./scripts/demo_day.sh`** runs the whole demo and automates rungs 1→3 itself: it attempts the live Nav2 run and drops to the recording on any failure or timeout, without you touching anything. See §11. |
+| 1 | Live Nav2 run in Gazebo | **`media/nav2_goal_run.mp4`** — recorded 2026-09-05. **This file was deleted 2026-09-06 07:43 and restored from Trash the same day.** It is gitignored, so a fresh clone does NOT have it and this rung is empty until you pull it from the USB `media.tar.gz`. `demo_day.sh --check` FAILs when it is missing. |
 | 2 | ORB-SLAM3 on the phone clip | **pySLAM, C++ core** — verified end to end on KITTI 06 (§7c). Needs `patches/` applied. |
 | 3 | Any live SLAM | **`media/map_building.mp4`** — recorded 2026-09-05 |
 | 4 | The laptop | Cloned backup machine (SPEC §8, owner C) |
@@ -1020,3 +1021,77 @@ Each rung is what you fall back to when the rung above fails. Test every rung (S
 - **Proves:** the vision → map → autonomous-navigation pipeline works.
   **Does not prove:** robustness to real terrain, noise, or lighting extremes.
   Stating the second half is what buys credibility for the first.
+
+
+---
+
+## 11. The final demo — one command  [VERIFIED 2026-09-06]
+
+```bash
+./scripts/demo_day.sh --check     # rehearsal gate: run this FIRST, every time
+./scripts/demo_day.sh             # the demonstration
+```
+
+Five segments, each fullscreen, pausing for a keypress between them so you can
+narrate. The relevant §10 talking points print to the terminal before each one,
+so the thing you must say is on the screen you are already looking at.
+
+| # | Segment | Source |
+|---|---|---|
+| 1 | Phone walk → SLAM map → 3D map | `media/phone_walk_slam_demo.mp4` (81 s) |
+| 2 | Accuracy vs ground truth | `media/kitti06_gt_demo_3x.mp4` (37 s) |
+| 3 | Sim: the robot builds its own map | `media/map_building.mp4` (170 s) |
+| 4 | **Autonomous navigation to a goal** | **live Gazebo/Nav2**, else `media/nav2_goal_run.mp4` (85 s) |
+| 5 | Mission-control UI | `frontend/dist`, served locally on `:8777` |
+
+### Flags
+
+| Flag | Use |
+|---|---|
+| `--check` | Preflight only. Every row must be PASS before you present. |
+| `--no-live` | Skip the live attempt; segment 4 plays the recording. The safe choice if the venue is hostile. |
+| `--from N` | Start at segment N. |
+| `--no-play` | Print what *would* play instead of playing it. For rehearsing the fallback, not the demo. |
+| `--live-timeout N` | Hard deadline for the whole live attempt (default 240 s). |
+
+### What preflight is actually telling you
+
+`FAIL` rows stop the demo; `WARN` rows degrade on their own. A missing sim image
+or an unreachable display is a WARN, because segment 4 simply uses the recording.
+A missing or undecodable video is a FAIL, because nothing else covers it.
+
+Decoding is checked, not just probed — Fedora's openh264 fails on some inputs
+that `ffprobe` reports as fine (§7f hit exactly this on the KITTI source), so
+`--check` confirms the player can actually decode each file.
+
+### Segment 4, the live path
+
+`run_demo.sh --detach` → `check_gpu.sh` must PASS on the RTX 4060 → launch
+`rtabmap_demos turtlebot3_sim_rgbd_demo.launch.py` → wait for `/map` → run
+`pick_goal.py` → `send_goal`. **Any failure or the deadline expiring tears the
+container down and plays the recording**, with a line saying it fell back.
+
+The goal comes from `pick_goal.py`, never from a hand-guess — §4 records
+`(-1.0, -0.3)` looking like open floor, sitting inside a wall, and aborting every
+time.
+
+`run_demo.sh` gained `--detach` for this. It shares one flag list with the
+interactive path on purpose: the `__NV_*` / `__GLX_*` vars are the part that is
+easy to get wrong and expensive to debug, so there is exactly one copy of them.
+
+### Rehearsing the failure, not just the success
+
+```bash
+IMAGE=nope ./scripts/demo_day.sh --from 4 --no-play --live-timeout 20
+```
+
+Proves the live segment degrades to the recording inside its deadline without
+sitting through six minutes of video. Verified 2026-09-06.
+
+### The frontend now has a home
+
+`frontend/` holds the mission-control UI, unzipped from what used to be the only
+copy in `~/Downloads`. `npm install && npm run build` produces `frontend/dist`,
+which segment 5 serves offline via `python3 -m http.server` — no dev server, no
+network, no npm at the venue. Sources are CRLF; do not let an LF-normalising
+editor near them.

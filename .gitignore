@@ -22,8 +22,16 @@ media/calib/*
 !media/phone_walk_clip_selection.png
 # NOT committed: media/map_building.mp4 is 100.7 MiB, over GitHub's 100 MiB hard
 # per-file limit. It would need LFS. It stays on the USB backup and in media.tar.gz.
-# NOT committed: media/nav2_goal_run.mp4 was deleted 2026-09-06 07:43; the copy in
-# ~/.local/share/Trash is the only one outside the USB media.tar.gz.
+# media/nav2_goal_run.mp4 stays OUT of git by instruction, but it is RESTORED on
+# disk (from Trash, 2026-09-06) because scripts/demo_day.sh needs it as the
+# automatic fallback for the live Nav2 segment. demo_day.sh --check FAILs without
+# it. If you clone this repo fresh, that segment has no fallback: pull the file
+# from the USB media.tar.gz before demoing.
+
+# The mission-control UI now lives in frontend/ instead of only in a Downloads
+# zip. node_modules/ and dist/ are excluded by frontend/.gitignore, which shipped
+# in the zip -- not repeated here. Sources are CRLF: do not let an LF-normalising
+# editor touch them, or a 97-line change becomes a whole-file diff.
 *.tar.gz
 docker/build.log
 __pycache__/
